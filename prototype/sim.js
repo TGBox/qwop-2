@@ -95,10 +95,11 @@
     const E = [];
     const line = (x1, y1, x2, y2, f) => E.push({ x1, y1, x2, y2, f: f == null ? 0.9 : f });
     line(-10, 0, 40, 0);
-    for (let x = 40; x < 90; x += 0.5) {                      // Hügel
+    for (let x = 40; x < 88; x += 0.5) {                      // Hügel (4 volle Wellen, endet auf Höhe 0)
       const y = a => 0.5 * (1 - Math.cos((a - 40) * 2 * Math.PI / 12)) * 0.9;
       line(x, y(x), x + 0.5, y(x + 0.5));
     }
+    line(88, 0, 90, 0);
     line(90, 0, 115, 0, 0.04);                                 // Eis
     line(GAP[1], 0, STAIRS.x0, 0);                             // nach der Schlucht
     for (let i = 0; i < STAIRS.steps; i++) {                   // Treppe
@@ -111,7 +112,17 @@
     return E;
   }
   const EDGES = buildEdges();
-  const OBSTACLES = [177, 181, 185, 189, 193].map((x, i) => ({ x, w: 0.3, h: i % 2 ? 0.55 : 0.4, y: PLATEAU_Y }));
+  const START_X = 2;
+  // Checkpoints: Spawnpunkte auf ebenem Boden (idx 0 = Start). Aktiv, sobald man 3 m dahinter ist.
+  const CHECKPOINTS = [
+    { x: START_X, y: 0, name: 'Start' },
+    { x: 40, y: 0, name: 'Hügel' },
+    { x: 91, y: 0, name: 'Eis' },
+    { x: 121, y: 0, name: 'Treppe' },
+    { x: 149, y: PLATEAU_Y, name: 'Windkorridor' },
+    { x: 176, y: PLATEAU_Y, name: 'Hürden' },
+  ];
+  const OBSTACLES = [180, 184, 188, 192, 196].map((x, i) => ({ x, w: 0.3, h: i % 2 ? 0.55 : 0.4, y: PLATEAU_Y }));
 
   // Wind: negative Beschleunigung (nach hinten), pulsierend
   function windAccel(x, t) {
@@ -120,7 +131,7 @@
   }
 
   // ---------- Simulation ----------
-  function createSim(genome) {
+  function createSim(genome, cpIdx) {
     const gen = sanitizeGenome(genome);
     const world = new pl.World({ gravity: new pl.Vec2(0, TUNE.gravity) });
     const ground = world.createBody({ type: 'static', userData: 'ground' });
@@ -134,7 +145,8 @@
     }
 
     const MASK = { filterCategoryBits: 2, filterMaskBits: 1 };
-    const sx = 2, sy = 0.2 + TUNE.thigh + TUNE.shin + 0.05;
+    const cp = CHECKPOINTS[cpIdx || 0] || CHECKPOINTS[0];
+    const sx = cp.x, sy = cp.y + 0.2 + TUNE.thigh + TUNE.shin + 0.05;
     const power = 1 + TUNE.powerBonus * gen.power;
     const foot = TUNE.footFriction * (1 + TUNE.clawBonus * gen.claws);
 
@@ -173,7 +185,7 @@
 
     const s = {
       world, rear, front, spine, legs, genome: gen,
-      steps: 0, time: 0, startX: sx, bestX: sx, lastProgressT: 0,
+      cpIdx: cpIdx || 0, steps: 0, time: 0, startX: sx, bestX: sx, lastProgressT: 0,
       tilt: 0, over: false, overReason: '', finished: false, handled: false,
       spinePress: 0, ghost: [],
     };
@@ -224,11 +236,11 @@
     };
 
     s.forceEnd = reason => end(reason);
-    s.distance = () => Math.max(0, s.bestX - s.startX);
+    s.distance = () => Math.max(0, s.bestX - START_X);   // immer ab dem echten Start gemessen
     s.legCount = () => legs.filter(Boolean).length;
     return s;
   }
 
-  root.QWOP2 = { createSim, KEYS, LABELS, FINGERS, DT, TUNE, GAP, EDGES, OBSTACLES, ZONES, WIND, windAccel,
+  root.QWOP2 = { createSim, KEYS, LABELS, FINGERS, DT, TUNE, GAP, START_X, CHECKPOINTS, EDGES, OBSTACLES, ZONES, WIND, windAccel,
                  defaultGenome, sanitizeGenome, rollOffers, applyMutation, describe };
 })(typeof window !== 'undefined' ? window : globalThis);

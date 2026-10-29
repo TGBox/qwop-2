@@ -1,7 +1,7 @@
 /* QWOP² – Rendering (Tintenfisch-Mutant, bunte Welt), Eingabe, Wachstums-Meta, Spielschleife */
 (function () {
   const Q = window.QWOP2;
-  const { createSim, KEYS, LABELS, DT, TUNE, EDGES, OBSTACLES, ZONES, WIND, windAccel, GAP } = Q;
+  const { createSim, KEYS, LABELS, DT, TUNE, EDGES, OBSTACLES, ZONES, WIND, windAccel, GAP, START_X, CHECKPOINTS } = Q;
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
   const errBox = document.getElementById('err');
@@ -16,24 +16,29 @@
 
   // --- Zustand ---
   let genome = Q.sanitizeGenome(store.get('qwop2.genome'));
-  let meta = Object.assign({ fails: 0, deaths: 0 }, store.get('qwop2.meta'));
+  let meta = Object.assign({ fails: 0, deaths: 0, cp: 0 }, store.get('qwop2.meta'));
+  if (!(meta.cp >= 0 && meta.cp < CHECKPOINTS.length)) meta.cp = 0;
   let best = store.get('qwop2.best') || { dist: 0, frames: [] };
+  if (best.ghostDist == null) best.ghostDist = best.frames.length ? best.dist : 0;   // Ghost nur von Läufen ab Start
   const down = new Array(8).fill(false);
   let space = false;
-  let sim = createSim(genome);
+  let camSnap = true, cpToast = null;
+  let sim = createSim(genome, meta.cp);
   let offers = null;
   let justGrown = null, grownAt = -1e9;
   let particles = [];
 
   const saveMeta = () => { store.set('qwop2.meta', meta); store.set('qwop2.genome', genome); };
-  function newRun() { sim = createSim(genome); down.fill(false); offers = null; }
+  function newRun(cpIdx) { sim = createSim(genome, cpIdx === undefined ? meta.cp : cpIdx); down.fill(false); offers = null; camSnap = true; }
 
   function handleRunEnd() {
     if (sim.handled) return;
     sim.handled = true;
     const d = sim.distance();
     const isBest = d > best.dist;
-    if (isBest) { best = { dist: d, frames: sim.ghost }; store.set('qwop2.best', best); }
+    if (isBest) best.dist = d;
+    if (sim.cpIdx === 0 && d > best.ghostDist) { best.frames = sim.ghost; best.ghostDist = d; }   // Ghost nur ab Start
+    if (isBest || sim.cpIdx === 0) store.set('qwop2.best', best);
     meta.deaths++;
     meta.fails = isBest ? 0 : meta.fails + 1;
     saveMeta();
@@ -70,8 +75,13 @@
     if (e.code === 'KeyM') { A.toggle(); return; }
     if (e.code === 'Space') { space = true; e.preventDefault(); return; }
     if (e.code === 'KeyR') { onRestartKey(); return; }
+    if (e.code === 'KeyT') {                      // von ganz vorn starten (auch für den Ghost)
+      if (!sim.over && sim.time > 3) { sim.forceEnd('Aufgegeben'); handleRunEnd(); if (offers) return; }
+      if (offers) declineOffer();
+      newRun(0); return;
+    }
     if (e.code === 'Delete') {
-      genome = Q.defaultGenome(); meta = { fails: 0, deaths: 0 }; best = { dist: 0, frames: [] };
+      genome = Q.defaultGenome(); meta = { fails: 0, deaths: 0, cp: 0 }; best = { dist: 0, frames: [], ghostDist: 0 };
       store.set('qwop2.best', best); saveMeta(); justGrown = null; newRun(); return;
     }
     if (offers && sim.over) {
@@ -285,8 +295,9 @@
     const W = innerWidth, H = innerHeight;
     ctx.textAlign = 'left'; ctx.shadowBlur = 0;
     const mx = (sim.rear.getPosition().x + sim.front.getPosition().x) / 2;
-    camX += (mx - camX) * 0.1;
     const my = (sim.rear.getPosition().y + sim.front.getPosition().y) / 2;
+    if (camSnap) { camX = mx; camY = Math.max(-2, my - 1.55); camSnap = false; }    // nach Neustart sofort hinspringen
+    camX += (mx - camX) * 0.1;
     camY += (Math.max(-2, my - 1.55) - camY) * 0.06;
     const groundScreenY = H * 0.72;
     const X = x => W / 2 + (x - camX) * PPM;
@@ -331,6 +342,15 @@
       ctx.fillStyle = '#ffb347'; ctx.strokeStyle = '#a65b00'; ctx.lineWidth = 3;
       ctx.fillRect(X(o.x - o.w / 2), Y(o.y + o.h), o.w * PPM, o.h * PPM); ctx.strokeRect(X(o.x - o.w / 2), Y(o.y + o.h), o.w * PPM, o.h * PPM);
     }
+    // Checkpoint-Fahnen
+    CHECKPOINTS.forEach((c, i) => {
+      if (i === 0 || c.x < vx0 || c.x > vx1) return;
+      const on = i <= meta.cp, px = X(c.x), py = Y(c.y);
+      ctx.strokeStyle = on ? '#fff' : 'rgba(255,255,255,.4)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px, py - 64); ctx.stroke();
+      ctx.fillStyle = on ? '#4ade80' : 'rgba(255,255,255,.3)';
+      ctx.beginPath(); ctx.moveTo(px, py - 64); ctx.lineTo(px + 30, py - 54 + Math.sin(now / 250 + i) * 2); ctx.lineTo(px, py - 44); ctx.closePath(); ctx.fill();
+    });
     // Zonenschilder
     ctx.font = 'bold 12px monospace';
     for (const z of ZONES) {
@@ -354,7 +374,7 @@
     }
 
     // Ghost
-    const g = best.frames[Math.min(best.frames.length - 1, sim.steps >> 1)];
+    const g = sim.cpIdx === 0 ? best.frames[Math.min(best.frames.length - 1, sim.steps >> 1)] : null;
     if (g) {
       ctx.globalAlpha = 0.3; ctx.fillStyle = '#ffd54f';
       for (const [px, py, pa] of [[g[0], g[1], g[2]], [g[3], g[4], g[5]]]) {
@@ -393,12 +413,19 @@
     ctx.globalAlpha = 1;
     const curX = Math.max(0, Math.min(total0, sim.front.getPosition().x));
     ctx.fillStyle = '#fff'; ctx.fillRect(sxs + curX / total0 * sw - 2, sys - 4, 4, 14);
-    ctx.fillStyle = '#ffd54f'; ctx.fillRect(sxs + Math.min(total0, best.dist + sim.startX) / total0 * sw - 1, sys - 2, 2, 10);
+    ctx.fillStyle = '#ffd54f'; ctx.fillRect(sxs + Math.min(total0, best.dist + START_X) / total0 * sw - 1, sys - 2, 2, 10);
+    ctx.fillStyle = '#4ade80';
+    CHECKPOINTS.forEach((c, i) => { if (i) ctx.fillRect(sxs + c.x / total0 * sw - 1, sys + 7, 2, 5); });
+    if (cpToast && now - cpToast.t < 2200) {
+      ctx.textAlign = 'center'; ctx.font = 'bold 26px system-ui';
+      ctx.fillStyle = `rgba(134,239,172,${Math.min(1, (2200 - (now - cpToast.t)) / 700)})`;
+      ctx.fillText('Checkpoint: ' + cpToast.name, W / 2, 130); ctx.textAlign = 'left';
+    }
     const zone = ZONES.find(z => curX >= z.x0 && curX < z.x1);
 
     // Info-Panel
     const line = 'Bestleistung ' + best.dist.toFixed(1) + ' m  ·  Beine ' + sim.legCount() + '/8  ·  Tode ' + meta.deaths +
-      '  ·  Läufe ohne Rekord ' + Math.min(meta.fails, TUNE.offerAfter) + '/' + TUNE.offerAfter + '  ·  R = Neustart';
+      '  ·  Läufe ohne Rekord ' + Math.min(meta.fails, TUNE.offerAfter) + '/' + TUNE.offerAfter + '  ·  R = ab Checkpoint  ·  T = von vorn';
     ctx.font = '14px system-ui';
     const pw = Math.min(W - 20, ctx.measureText(line).width + 28);
     panel(10, 22, pw, 62);
@@ -488,6 +515,11 @@
     acc += dtSec; prev = now;
     while (acc >= DT) { sim.step(down, space); acc -= DT; }
     if (sim.over) handleRunEnd();
+    else {                                          // Checkpoints erreicht?
+      while (meta.cp + 1 < CHECKPOINTS.length && sim.front.getPosition().x >= CHECKPOINTS[meta.cp + 1].x + 3) {
+        meta.cp++; saveMeta(); cpToast = { name: CHECKPOINTS[meta.cp].name, t: now }; A.checkpoint();
+      }
+    }
     A.wind(sim.over ? 0 : Math.abs(windAccel(sim.front.getPosition().x, sim.time)) / WIND.accel);
     draw(now, dtSec);
     requestAnimationFrame(frame);

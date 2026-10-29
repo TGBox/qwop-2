@@ -39,6 +39,7 @@
     press(i)   { tone(260 + i * 35, 0.09, { type: 'triangle', vol: 0.16, slide: 1.6 }); },   // Bein zieht an
     release(i) { tone(190 + i * 22, 0.12, { type: 'sine', vol: 0.13, slide: 0.55 }); },       // Bein schiebt zurück
     scared()   { tone(520, 0.22, { type: 'square', vol: 0.06, slide: 0.5 }); tone(430, 0.28, { type: 'square', vol: 0.06, slide: 0.5, delay: 0.13 }); },
+    checkpoint() { tone(NOTE.E5, 0.18, { type: 'triangle', vol: 0.15 }); tone(NOTE.G5, 0.18, { type: 'triangle', vol: 0.15, delay: 0.1 }); tone(NOTE.C6, 0.35, { type: 'triangle', vol: 0.15, delay: 0.2 }); },
     chime()    { tone(NOTE.G5, 0.25, { type: 'triangle', vol: 0.15 }); tone(NOTE.C6, 0.4, { type: 'triangle', vol: 0.15, delay: 0.14 }); },
     grow() {
       [NOTE.C5, NOTE.E5, NOTE.G5, NOTE.C6, NOTE.E6].forEach((f, k) => tone(f, 0.35, { type: 'triangle', vol: 0.17, delay: k * 0.08 }));
