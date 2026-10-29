@@ -1,38 +1,45 @@
-# Arbeitstitel: QWOP² – "Kreatur"-Variante
+# Arbeitstitel: QWOP² – Kreatur mit Wachstum
 
 ## Problem Statement
+
 Wie bringen wir das Gefühl von QWOP (indirekte Steuerung, Physik als Gegner, Scheitern ist lustig) in ein neues Theme, das nach 30 Minuten noch Entscheidungen und Meisterschaft bietet?
 
-## Empfohlene Richtung
-**Skill-first Kreatur-Spiel im Browser.** Eine Kreatur mit mehreren Gliedmaßen, gesteuert über Tasten-Paare, die jeweils Gelenke kontrollieren. Ziel ist Distanz über wechselnde Terrains. Tiefe entsteht aus Terrain-Vielfalt und Meisterschaft, nicht aus Feature-Menge.
+## Richtung (entschieden)
 
-Verworfene Richtungen:
-- **Mutant-Run (Roguelite):** Upgrades nach jedem Sturz. Verwässert den Skill-Kern und braucht viel Balancing. Später als Erweiterung denkbar.
-- **Zwei Köpfe (Co-op):** Ein Körper, zwei Spieler. Witzig, aber Netzwerk/Input-Sync sprengt ein Wochenende. Lokal wäre günstig, aber erst nach dem Kern.
+Skill-first Kreaturenspiel im Browser. Eine Kreatur mit 2 Körperhälften, bis zu 8 Beinen (ein Finger je Bein) und einem Körpergelenk (beide Daumen, Leertaste). Tiefe kommt aus **Wachstum über Frust** und aus der Strecke, nicht aus Feature-Menge.
 
-## Key Assumptions (zu validieren)
-1. Die Physik macht in den ersten 10 Sekunden Spaß, auch wenn man scheitert. Das Kill-Kriterium des Projekts.
-2. Eine Kreatur mit 4+ Gliedmaßen ist mit Tastatur noch lernbar (nicht nur frustrierend).
-3. Terrain-Wechsel (Hügel, Lücken, Eis) reichen als Tiefe, bevor Upgrades nötig sind.
-4. Ghost-Replay der besten Runde ersetzt vorerst echten Wettbewerb.
+## Kernmechanik: Wachstum statt Verlust
 
-## MVP Scope (ca. 1 Wochenende)
-- Stack: TypeScript + Vite, Canvas 2D, Planck.js (Box2D) für stabile Ragdoll-Physik
-- 1 Kreatur (Placeholder-Optik, Strich-Stil), Steuerung über 4 bis 6 Tasten
-- 3 kurze Terrain-Abschnitte: flach, Hügel, Lücke/Eis
-- Distanzanzeige, Sturzerkennung, Sofort-Neustart (R)
-- Bestweite in localStorage, Ghost der besten Runde
-- Greybox zuerst. Erst wenn das Stolpern Spaß macht, kommen Optik und Sound.
+- Start mit 2 Beinen (D hinten, K vorn). Wenig Finger, wenig Chaos.
+- Nach 10 Läufen ohne neuen Rekord: Angebot mit bis zu 3 Mutationen (Taste 1 bis 3), ablehnbar mit R.
+- Mutationen: neues Bein (gezielt mit Taste/Finger), Wirbelsäule (Daumen, erst ab 4 Beinen), Krallenfüße (2 Stufen), starke Muskeln (2 Stufen).
+- Wachstum bleibt gespeichert (localStorage), Entf setzt zurück.
+- Verworfen: Beine verlieren als Schwierigkeitsrampe. Hat im Test nie ausgelöst, und die Umkehrung ist besser: Komplexität wächst mit der Bereitschaft des Spielers.
+
+## Stand des Prototyps (prototype/)
+
+- Technik: HTML/JS, Planck.js (Box2D, per CDN). Dateien: index.html, sim.js (Physik/Regeln/Mutationen, alle Werte in TUNE), game.js (Rendering/Eingabe/Meta).
+- Strecke: 200 m mit flach, Hügeln, Eisfläche und Grube. Ghost des Bestlaufs, Bestweite gespeichert.
+- Playtest-Ergebnisse: zwei Beine spielbar, Spaß vorhanden (41 m nach wenigen Läufen), Daumen-Reihenfolge ok. Angebotsschwelle von 5 auf 10 erhöht. Abbruchregeln (Festgefahren/Umgekippt) gelockert.
+
+## Key Assumptions
+
+1. ✅ Physik macht von Anfang an Spaß (bestätigt).
+2. ✅ Zwei Beine sind spielbar (bestätigt).
+3. ❓ Mehr Beine/Mutationen fühlen sich wie Hilfe an, nicht nur wie mehr Chaos.
+4. ❓ Terrain-Vielfalt trägt die Tiefe bis zum Ziel (200 m).
+5. ❓ Alle 10 Finger lassen sich in der Endstufe noch sinnvoll nutzen.
 
 ## Not Doing (bewusst)
-- Kein Multiplayer/Netzwerk (höchstens lokaler Co-op später)
-- Kein Roguelite-/Upgrade-System
-- Keine Story, kein Menü-Overhead, kein Account/Leaderboard-Backend
-- Kein Mobile/Touch
-- Kein Asset-Polishing vor dem Spaß-Check
+
+- Kein Multiplayer/Netzwerk (lokaler Co-op frühestens später)
+- Kein Beinverlust-System, keine Upgrade-Wirtschaft, keine Story
+- Kein Mobile/Touch, kein Leaderboard-Backend
+- Kein Asset-Polishing, bevor die Balance steht
 
 ## Open Questions
-- Wie viele Gliedmaßen und welches Tastenschema genau (z. B. 4 Beine = 4 Tasten + Shift)?
-- Welche Kreatur konkret (Salamander, Krake, Käfer)? Das bestimmt Silhouette und Humor.
-- Soll Scheitern ein Ende sein (Ziel) oder ein Mechanismus (z. B. Beine verlieren)?
-- Ghost: nur eigener Bestlauf oder auch teilbar?
+
+- Welche Kreatur konkret (Salamander, Krake, Käfer) und welcher Look?
+- Brauchen die späten Stufen eigene Terrain-Aufgaben (Klettern, Tragen), oder reicht Distanz?
+- Sound und Musik: Stil?
+- Balance der Mutationen (Beine stark, Krallen schwach?)

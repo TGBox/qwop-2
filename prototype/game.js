@@ -1,7 +1,7 @@
 /* QWOP² – Rendering, Eingabe, Wachstums-Meta, Spielschleife */
 (function () {
   const Q = window.QWOP2;
-  const { createSim, KEYS, LABELS, DT, TUNE, terrainY, GAP } = Q;
+  const { createSim, KEYS, LABELS, DT, TUNE, EDGES, OBSTACLES, ZONES, WIND, windAccel } = Q;
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
   const errBox = document.getElementById('err');
@@ -49,7 +49,7 @@
     meta.fails = 0; saveMeta();
     newRun();
   }
-  function declineOffer() { meta.fails = Math.max(0, TUNE.offerAfter - 3); saveMeta(); newRun(); }
+  function declineOffer() { meta.fails = Math.max(0, Math.round(TUNE.offerAfter / 2)); saveMeta(); newRun(); }
 
   function onRestartKey() {
     if (!sim.over) {
@@ -90,7 +90,7 @@
   addEventListener('resize', resize); resize();
 
   // --- Zeichnen ---
-  let camX = 0;
+  let camX = 0, camY = 0;
   const hue = i => `hsl(${i * 40},70%,60%)`;
 
   function draw() {
@@ -99,9 +99,11 @@
     ctx.fillStyle = '#14161a'; ctx.fillRect(0, 0, W, H);
     const mx = (sim.rear.getPosition().x + sim.front.getPosition().x) / 2;
     camX += (mx - camX) * 0.1;
+    const my = (sim.rear.getPosition().y + sim.front.getPosition().y) / 2;
+    camY += (Math.max(-2, my - 1.55) - camY) * 0.06;     // folgt Treppen/Plateau
     const groundScreenY = H * 0.72;
     const X = x => W / 2 + (x - camX) * PPM;
-    const Y = y => groundScreenY - y * PPM;
+    const Y = y => groundScreenY - (y - camY) * PPM;
 
     // Meter-Marker
     ctx.strokeStyle = '#2a2e36'; ctx.fillStyle = '#566'; ctx.font = '11px monospace'; ctx.lineWidth = 1;
@@ -110,19 +112,37 @@
       ctx.beginPath(); ctx.moveTo(X(x), 0); ctx.lineTo(X(x), H); ctx.stroke();
       ctx.fillText((x - sim.startX).toFixed(0) + ' m', X(x) + 4, 16);
     }
-    // Boden
-    ctx.beginPath(); let started = false;
-    const from = camX - W / 2 / PPM - 1, to = camX + W / 2 / PPM + 1;
-    for (let x = Math.floor(from * 2) / 2; x <= to; x += 0.5) {
-      if (x >= GAP[0] && x < GAP[1]) { if (started) ctx.lineTo(X(GAP[0]), Y(terrainY(GAP[0]))); started = false; continue; }
-      if (!started) { ctx.moveTo(X(x), Y(terrainY(x))); started = true; } else ctx.lineTo(X(x), Y(terrainY(x)));
+    // Boden (Kantenliste), Hürden, Zonenfarben
+    const vx0 = camX - W / 2 / PPM - 2, vx1 = camX + W / 2 / PPM + 2;
+    ctx.lineWidth = 3; ctx.lineCap = 'round';
+    for (const e of EDGES) {
+      if (e.y1 < -5) continue;                                  // Grubenboden nicht zeichnen
+      if (Math.max(e.x1, e.x2) < vx0 || Math.min(e.x1, e.x2) > vx1) continue;
+      ctx.strokeStyle = e.f < 0.1 ? '#8fd0ff' : '#cfd6e0';
+      ctx.beginPath(); ctx.moveTo(X(e.x1), Y(e.y1)); ctx.lineTo(X(e.x2), Y(e.y2)); ctx.stroke();
     }
-    ctx.strokeStyle = '#cfd6e0'; ctx.lineWidth = 3; ctx.stroke();
-    ctx.fillStyle = 'rgba(120,200,255,.25)'; ctx.fillRect(X(90), Y(0) - 3, 25 * PPM, 6);
+    ctx.fillStyle = '#fb923c';
+    for (const o of OBSTACLES) ctx.fillRect(X(o.x - o.w / 2), Y(o.y + o.h), o.w * PPM, o.h * PPM);
     ctx.font = '12px monospace';
-    ctx.fillStyle = '#8fd0ff'; ctx.fillText('EIS', X(90) + 6, Y(0) + 20);
-    ctx.fillStyle = '#ff8a80'; ctx.fillText('GRUBE', X(GAP[0]) + 6, Y(0) + 20);
-    ctx.fillStyle = '#9f9'; ctx.fillText('ZIEL', X(TUNE.finishX) + 6, Y(0) - 8);
+    for (const z of ZONES) {
+      if (z.x1 < vx0 || z.x0 > vx1) continue;
+      ctx.fillStyle = z.color; ctx.globalAlpha = 0.9;
+      const by = z.x0 >= 148 ? Q.EDGES[Q.EDGES.length - 2].y1 : 0;
+      ctx.fillText(z.name.toUpperCase(), X(z.x0) + 6, Y(by) + 24);
+      ctx.fillRect(X(z.x0), Y(by) + 28, 3, 10); ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = '#9f9'; ctx.fillText('ZIEL', X(TUNE.finishX) + 6, Y(Q.EDGES[Q.EDGES.length - 2].y1) - 8);
+    ctx.fillRect(X(TUNE.finishX), Y(Q.EDGES[Q.EDGES.length - 2].y1) - 40, 3, 40);
+    // Wind-Streifen
+    if (vx1 > WIND.x0 && vx0 < WIND.x1) {
+      const str = Math.abs(windAccel((WIND.x0 + WIND.x1) / 2, sim.time)) / WIND.accel;
+      ctx.strokeStyle = `rgba(196,181,253,${0.15 + 0.5 * str})`; ctx.lineWidth = 2;
+      for (let i = 0; i < 28; i++) {
+        const wx = WIND.x0 + ((i * 7.3 - sim.time * (6 + str * 8)) % (WIND.x1 - WIND.x0) + (WIND.x1 - WIND.x0)) % (WIND.x1 - WIND.x0);
+        const wy = Q.EDGES[Q.EDGES.length - 2].y1 + 0.4 + (i * 0.37) % 3;
+        ctx.beginPath(); ctx.moveTo(X(wx), Y(wy)); ctx.lineTo(X(wx - 0.8 - str), Y(wy)); ctx.stroke();
+      }
+    }
 
     // Ghost
     const g = best.frames[Math.min(best.frames.length - 1, sim.steps >> 1)];
@@ -155,6 +175,19 @@
       '  ·  Läufe ohne Rekord ' + Math.min(meta.fails, TUNE.offerAfter) + '/' + TUNE.offerAfter + '  ·  R = Neustart', 20, 62);
     ctx.font = '11px system-ui'; ctx.fillStyle = '#566';
     ctx.fillText('Entf = Fortschritt zurücksetzen', 20, H - 14);
+
+    // Streckenband oben: Zonen, Position und Bestweite
+    const sw = Math.min(520, W - 40), sxs = W / 2 - sw / 2, sys = 14, total0 = TUNE.finishX;
+    for (const z of ZONES) {
+      ctx.fillStyle = z.color; ctx.globalAlpha = 0.55;
+      ctx.fillRect(sxs + z.x0 / total0 * sw, sys, (z.x1 - z.x0) / total0 * sw - 1, 6);
+    }
+    ctx.globalAlpha = 1;
+    const curX = Math.max(0, Math.min(total0, sim.front.getPosition().x - sim.startX));
+    ctx.fillStyle = '#fff'; ctx.fillRect(sxs + curX / total0 * sw - 2, sys - 4, 4, 14);
+    ctx.fillStyle = '#ffd54f'; ctx.fillRect(sxs + Math.min(total0, best.dist) / total0 * sw - 1, sys - 2, 2, 10);
+    const zone = ZONES.find(z => curX + sim.startX >= z.x0 && curX + sim.startX < z.x1);
+    if (zone) { ctx.textAlign = 'center'; ctx.fillStyle = zone.color; ctx.font = '12px system-ui'; ctx.fillText(zone.name, W / 2, sys + 24); ctx.textAlign = 'left'; }
 
     // Tastenanzeige
     const kw = 44, gap = 8, mid = 2 * kw;

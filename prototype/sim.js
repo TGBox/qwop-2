@@ -25,8 +25,8 @@
     clawBonus: 0.4,      // je Krallen-Stufe
     powerBonus: 0.3,     // je Muskel-Stufe
     // Regeln
-    tiltLimit: 1.3, tiltEndTime: 1.5,   // umgekippt -> Lauf endet
-    stallTime: 8,
+    tiltLimit: 1.7, tiltEndTime: 3,     // erst wenn wirklich auf dem Rücken/Kopf: Lauf endet
+    stallTime: 20,                      // s ohne neue Bestweite -> "Festgefahren"
     finishX: 200,
     pitY: -4,
     offerAfter: 10,      // Läufe ohne neuen Rekord bis zum Wachstums-Angebot
@@ -75,24 +75,63 @@
   }
 
   // ---------- Gelände ----------
-  function terrainY(x) {
-    if (x >= 40 && x <= 90) return 0.5 * (1 - Math.cos((x - 40) * 2 * Math.PI / 12)) * 0.9;
-    return 0;
-  }
-  function terrainFriction(x) { return x >= 90 && x < 115 ? 0.04 : 0.9; }
+  // Zonen: jede hat eine eigene Aufgabe
+  const ZONES = [
+    { name: 'Einstieg', x0: 0, x1: 40, color: '#6ee7b7' },
+    { name: 'Hügel', x0: 40, x1: 90, color: '#a3e635' },
+    { name: 'Eis', x0: 90, x1: 115, color: '#8fd0ff' },
+    { name: 'Schlucht', x0: 115, x1: 118.5, color: '#ff8a80' },
+    { name: 'Treppe', x0: 118.5, x1: 148, color: '#fbbf24' },
+    { name: 'Windkorridor', x0: 148, x1: 175, color: '#c4b5fd' },
+    { name: 'Hürden', x0: 175, x1: 200, color: '#fb923c' },
+  ];
   const GAP = [115, 118.5];
+  const STAIRS = { x0: 128, steps: 10, run: 2.0, rise: 0.18 };
+  const PLATEAU_Y = STAIRS.steps * STAIRS.rise;
+  const WIND = { x0: 150, x1: 175, accel: 2.8 };   // m/s² nach hinten, pulsiert
+
+  // Gelände als Kantenliste {x1,y1,x2,y2,f}
+  function buildEdges() {
+    const E = [];
+    const line = (x1, y1, x2, y2, f) => E.push({ x1, y1, x2, y2, f: f == null ? 0.9 : f });
+    line(-10, 0, 40, 0);
+    for (let x = 40; x < 90; x += 0.5) {                      // Hügel
+      const y = a => 0.5 * (1 - Math.cos((a - 40) * 2 * Math.PI / 12)) * 0.9;
+      line(x, y(x), x + 0.5, y(x + 0.5));
+    }
+    line(90, 0, 115, 0, 0.04);                                 // Eis
+    line(GAP[1], 0, STAIRS.x0, 0);                             // nach der Schlucht
+    for (let i = 0; i < STAIRS.steps; i++) {                   // Treppe
+      const x = STAIRS.x0 + i * STAIRS.run, y = i * STAIRS.rise;
+      line(x, y, x + STAIRS.run, y);
+      line(x + STAIRS.run, y, x + STAIRS.run, y + STAIRS.rise);
+    }
+    line(STAIRS.x0 + STAIRS.steps * STAIRS.run, PLATEAU_Y, 240, PLATEAU_Y);
+    E.push({ x1: GAP[0] - 1, y1: -8, x2: GAP[1] + 1, y2: -8, f: 0.5 });  // Grubenboden
+    return E;
+  }
+  const EDGES = buildEdges();
+  const OBSTACLES = [177, 181, 185, 189, 193].map((x, i) => ({ x, w: 0.3, h: i % 2 ? 0.55 : 0.4, y: PLATEAU_Y }));
+
+  // Wind: negative Beschleunigung (nach hinten), pulsierend
+  function windAccel(x, t) {
+    if (x < WIND.x0 || x > WIND.x1) return 0;
+    return -WIND.accel * (0.55 + 0.45 * Math.sin(t * 1.4));
+  }
 
   // ---------- Simulation ----------
   function createSim(genome) {
     const gen = sanitizeGenome(genome);
     const world = new pl.World({ gravity: new pl.Vec2(0, TUNE.gravity) });
     const ground = world.createBody({ type: 'static', userData: 'ground' });
-    for (let x = -10; x < TUNE.finishX + 20; x += 0.5) {
-      if (x >= GAP[0] && x < GAP[1]) continue;
-      ground.createFixture(new pl.Edge(new pl.Vec2(x, terrainY(x)), new pl.Vec2(x + 0.5, terrainY(x + 0.5))),
-        { friction: terrainFriction(x), filterCategoryBits: 1, filterMaskBits: 0xffff });
+    for (const e of EDGES) {
+      ground.createFixture(new pl.Edge(new pl.Vec2(e.x1, e.y1), new pl.Vec2(e.x2, e.y2)),
+        { friction: e.f, filterCategoryBits: 1, filterMaskBits: 0xffff });
     }
-    ground.createFixture(new pl.Edge(new pl.Vec2(GAP[0] - 1, -8), new pl.Vec2(GAP[1] + 1, -8)), { friction: 0.5 });
+    for (const o of OBSTACLES) {
+      ground.createFixture(new pl.Box(o.w / 2, o.h / 2, new pl.Vec2(o.x, o.y + o.h / 2), 0),
+        { friction: 0.9, filterCategoryBits: 1, filterMaskBits: 0xffff });
+    }
 
     const MASK = { filterCategoryBits: 2, filterMaskBits: 1 };
     const sx = 2, sy = 0.2 + TUNE.thigh + TUNE.shin + 0.05;
@@ -159,6 +198,11 @@
         drive(spine, TUNE.spineRest + (TUNE.spinePress - TUNE.spineRest) * s.spinePress);
       } else drive(spine, 0);
 
+      for (let b = world.getBodyList(); b; b = b.getNext()) {   // Wind
+        if (!b.isDynamic()) continue;
+        const a = windAccel(b.getPosition().x, s.time);
+        if (a) b.applyForceToCenter(new pl.Vec2(a * b.getMass(), 0), true);
+      }
       world.step(DT, 8, 3);
       s.steps++; s.time += DT;
 
@@ -185,6 +229,6 @@
     return s;
   }
 
-  root.QWOP2 = { createSim, KEYS, LABELS, FINGERS, DT, TUNE, terrainY, GAP,
+  root.QWOP2 = { createSim, KEYS, LABELS, FINGERS, DT, TUNE, GAP, EDGES, OBSTACLES, ZONES, WIND, windAccel,
                  defaultGenome, sanitizeGenome, rollOffers, applyMutation, describe };
 })(typeof window !== 'undefined' ? window : globalThis);
